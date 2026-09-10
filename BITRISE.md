@@ -20,7 +20,13 @@ Build artifacts are uploaded with the final deployment step, including on failur
 - `build.log`: full build-script diagnostics.
 - `xcodebuild-archive.log`: raw Xcode output, once archiving starts.
 - `engine-symbols.log`: native engine checks, if archiving succeeds.
-- `OpenFlux-unsigned.ipa` and `OpenFlux.xcarchive.zip`: successful builds only.
+- `OpenFlux-unsigned.ipa.zip` and `OpenFlux.xcarchive.zip`: successful builds
+  only. Extract the first ZIP to obtain `OpenFlux-unsigned.ipa`.
+
+Bitrise validates any artifact whose filename ends in `.ipa` as a signed
+installable application. The unsigned workflow deliberately has no provisioning
+profile, so it uploads a ZIP containing the IPA instead; this avoids a false
+deployment failure after a successful archive.
 
 No automatic Git triggers are enabled here. Start builds manually, or configure
 the desired triggers in Bitrise after the first successful build.

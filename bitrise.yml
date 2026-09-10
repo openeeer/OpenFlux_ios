@@ -57,10 +57,15 @@ workflows:
                 mkdir -p "$BUILD_ROOT/package/Payload"
                 cp -R "$APP" "$BUILD_ROOT/package/Payload/"
                 cd "$BUILD_ROOT/package"
-                zip -qry "$BITRISE_DEPLOY_DIR/OpenFlux-unsigned.ipa" Payload
+                # Bitrise analyses every .ipa in its deploy directory as a
+                # signed installable app. This archive is deliberately
+                # unsigned, so keep the IPA in the temporary directory and
+                # upload a ZIP wrapper as a generic artifact instead.
+                IPA="$BUILD_ROOT/OpenFlux-unsigned.ipa"
+                zip -qry "$IPA" Payload
+                zip -q -j "$BITRISE_DEPLOY_DIR/OpenFlux-unsigned.ipa.zip" "$IPA"
                 ditto -c -k --keepParent "$ARCHIVE" "$BITRISE_DEPLOY_DIR/OpenFlux.xcarchive.zip"
       - deploy-to-bitrise-io@2:
           is_always_run: true
           inputs:
             - deploy_path: "$BITRISE_DEPLOY_DIR"
-
