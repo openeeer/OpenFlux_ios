@@ -56,27 +56,38 @@ char *OpenFluxCopyLogs(void) { return strdup("[engine] Stub build: native Go eng
 void OpenFluxFreeLogs(char *logs) { free(logs); }
 STUB_EOF
 
-  local cc sdk arch
+  local cc sdk arch target_flag
   cc="$(xcrun --sdk "${PLATFORM_NAME}" --find clang)"
   sdk="$(xcrun --sdk "${PLATFORM_NAME}" --show-sdk-path)"
-  arch="$(echo "${ARCHS:-arm64}" | awk '{print $1}')"
-
-  local target_flag=""
-  if [ "${PLATFORM_NAME}" = "iphonesimulator" ]; then
-    target_flag="-target ${arch}-apple-ios-simulator"
-  fi
-
-  local obj="${OUT_DIR}/.engine_stub.o"
-  # shellcheck disable=SC2086
-  "${cc}" -c -O2 -isysroot "${sdk}" -arch "${arch}" ${target_flag} \
-    -mios-version-min=17.0 \
-    -o "${obj}" "${stub_src}"
+  local -a slices=()
+  # Bitrise's default iOS test build requests arm64 and x86_64 simulators in
+  # one invocation. Build a stub slice for every requested architecture; using
+  # only the first ARCHS value makes the other linker fail with undefined Go
+  # bridge symbols.
+  for arch in ${ARCHS:-arm64}; do
+    target_flag=""
+    if [ "${PLATFORM_NAME}" = "iphonesimulator" ]; then
+      target_flag="-target ${arch}-apple-ios-simulator"
+    fi
+    local obj="${OUT_DIR}/.engine_stub.${arch}.o"
+    local slice="${OUT_DIR}/.engine_stub.${arch}.a"
+    # shellcheck disable=SC2086
+    "${cc}" -c -O2 -isysroot "${sdk}" -arch "${arch}" ${target_flag} \
+      -mios-version-min=17.0 \
+      -o "${obj}" "${stub_src}"
+    xcrun libtool -static -o "${slice}" "${obj}" 2>/dev/null \
+      || ar rcs "${slice}" "${obj}"
+    slices+=("${slice}")
+  done
 
   rm -f "${LIB}"
-  xcrun libtool -static -o "${LIB}" "${obj}" 2>/dev/null \
-    || ar rcs "${LIB}" "${obj}"
+  if [ "${#slices[@]}" -eq 1 ]; then
+    mv "${slices[0]}" "${LIB}"
+  else
+    xcrun lipo -create "${slices[@]}" -output "${LIB}"
+  fi
 
-  rm -f "${obj}" "${stub_src}"
+  rm -f "${OUT_DIR}"/.engine_stub.*.o "${OUT_DIR}"/.engine_stub.*.a "${stub_src}"
   echo "note: stub engine written to ${LIB}"
 }
 
