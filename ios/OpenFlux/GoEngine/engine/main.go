@@ -90,7 +90,8 @@ func RunMainClient(url *C.char) {
 }
 
 // OpenFluxStartTunnel is the explicit form of RunMainClient: it takes the SOCKS
-// listen port as well. Returns 0 on success, non-zero on failure.
+// listen port as well, and blocks for the tunnel lifetime. It returns non-zero
+// when startup fails.
 //
 //export OpenFluxStartTunnel
 func OpenFluxStartTunnel(url *C.char, port C.int) C.int {

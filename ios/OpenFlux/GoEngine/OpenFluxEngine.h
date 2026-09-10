@@ -17,6 +17,10 @@ extern "C" {
 /// so call it from a background thread.
 void RunMainClient(char *url);
 
+/// Start the SOCKS5 client tunnel on an explicit local port. Blocks for the
+/// tunnel lifetime and returns non-zero when it could not start.
+int OpenFluxStartTunnel(char *url, int port);
+
 /// Start the exit-node raw-socket engine. Needs root; unusable on iOS.
 void RunMainExitNode(void);
 

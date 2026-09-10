@@ -43,13 +43,18 @@ final class NetworkManager: ObservableObject {
             status = .error("Invalid document URL")
             return
         }
+        guard (1...65535).contains(config.socksPort) else {
+            status = .error("Invalid SOCKS port")
+            return
+        }
 
         status = .connecting
         generation &+= 1
         let gen = generation
+        let port = config.socksPort
 
         let thread = Thread { [weak self] in
-            Self.runTunnel(url: url.absoluteString, generation: gen, owner: self)
+            Self.runTunnel(url: url.absoluteString, port: port, generation: gen, owner: self)
         }
         thread.name = "openflux.tunnel"
         thread.stackSize = 1 << 20
@@ -76,7 +81,7 @@ final class NetworkManager: ObservableObject {
 
     // MARK: - Tunnel thread
 
-    private static func runTunnel(url: String, generation: UInt64, owner: NetworkManager?) {
+    private static func runTunnel(url: String, port: Int, generation: UInt64, owner: NetworkManager?) {
         guard let owner else { return }
 
         if owner.isStubEngine {
@@ -93,13 +98,19 @@ final class NetworkManager: ObservableObject {
             $0.startStatsTimer()
         }
 
-        // Blocks for the tunnel lifetime.
-        url.withCString { RunMainClient(UnsafeMutablePointer(mutating: $0)) }
+        // OpenFluxStartTunnel blocks for the tunnel lifetime, but unlike the
+        // legacy RunMainClient entry point it receives the selected SOCKS port.
+        let result = url.withCString {
+            OpenFluxStartTunnel(UnsafeMutablePointer(mutating: $0), Int32(port))
+        }
 
         // Returned: either StopTunnel() fired, or the engine failed.
         owner.publish(generation: generation) {
             $0.stopStatsTimer()
-            if $0.status.isActive {
+            if result != 0 {
+                $0.status = .error("Tunnel failed to start (see Logs)")
+                $0.stats = ConnectionStats()
+            } else if $0.status.isActive {
                 $0.status = .disconnected
                 $0.stats = ConnectionStats()
             }
