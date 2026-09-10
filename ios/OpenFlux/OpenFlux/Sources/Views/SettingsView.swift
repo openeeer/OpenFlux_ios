@@ -43,8 +43,8 @@ struct SettingsView: View {
                     }
                 }
                 Section("About") {
-                    LabeledContent("Version", value: Bundle.appVersion)
-                    LabeledContent("Build", value: Bundle.buildNumber)
+                    LabeledContent("Version", value: Bundle.main.appVersion)
+                    LabeledContent("Build", value: Bundle.main.buildNumber)
                     LabeledContent("License", value: "GPL-3.0")
                 }
             }
