@@ -13,55 +13,40 @@ struct HomeView: View {
                 Section {
                     VStack(spacing: 16) {
                         Image(systemName: vm.status == .connected ? "checkmark.shield.fill" : "shield")
-                            .font(.system(size: 58, weight: .regular))
+                            .font(.system(size: 58))
                             .foregroundStyle(vm.status == .connected ? .green : .accentColor)
                             .symbolEffect(.pulse, isActive: vm.status == .connecting)
-
                         VStack(spacing: 4) {
-                            Text(vm.status.displayText)
-                                .font(.title2.weight(.semibold))
+                            Text(vm.status.displayText).font(.title2.weight(.semibold))
                             Text(vm.status == .connected ? "SOCKS5 proxy is ready" : "Connect to start the local proxy")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
+                    .frame(maxWidth: .infinity).padding(.vertical, 28)
                     .listRowBackground(Color.clear)
                 }
-
                 Section {
-                    PrimaryButton(
-                        label: buttonLabel,
-                        systemImage: buttonIcon,
-                        color: vm.status == .connected ? .red : .accentColor,
-                        action: vm.toggleConnection
-                    )
-                    .disabled(vm.status == .connecting || (!vm.canConnect && !vm.status.isActive))
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    PrimaryButton(label: buttonLabel, systemImage: buttonIcon,
+                                  color: vm.status == .connected ? .red : .accentColor,
+                                  action: vm.toggleConnection)
+                        .disabled(vm.status == .connecting || (!vm.canConnect && !vm.status.isActive))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
-
                 Section("Local Proxy") {
                     HStack {
                         Label("SOCKS5 address", systemImage: "network")
                         Spacer()
-                        Text(endpoint).font(.body.monospaced())
-                            .foregroundStyle(.secondary)
+                        Text(endpoint).font(.body.monospaced()).foregroundStyle(.secondary)
                         Button {
                             UIPasteboard.general.string = endpoint
                             copied = true
-                        } label: {
-                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Copy proxy address")
+                        } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Copy proxy address")
                     }
-
                     Label("This is a local proxy, not a system VPN", systemImage: "info.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
-
                 Section("Server") {
                     LabeledContent("Configuration", value: vm.selectedConfig.name)
                     LabeledContent("Transport", value: vm.selectedConfig.transport.displayName)
@@ -70,19 +55,14 @@ struct HomeView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-
                 if vm.isStubEngine {
                     Section {
                         Label("This build contains the stub engine and cannot connect.", systemImage: "wrench.and.screwdriver")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
+                            .font(.footnote).foregroundStyle(.orange)
                     }
                 }
-
                 if case .error(let message) = vm.status {
-                    Section("Connection Error") {
-                        Text(message).foregroundStyle(.red)
-                    }
+                    Section("Connection Error") { Text(message).foregroundStyle(.red) }
                 }
             }
             .navigationTitle("OpenFlux")
@@ -104,13 +84,9 @@ struct HomeView: View {
         }
     }
 
-    private var buttonIcon: String {
-        vm.status == .connected ? "stop.fill" : "play.fill"
-    }
+    private var buttonIcon: String { vm.status == .connected ? "stop.fill" : "play.fill" }
 }
 
 #Preview {
-    HomeView()
-        .environmentObject(ConnectionViewModel())
-        .environmentObject(SettingsViewModel())
+    HomeView().environmentObject(ConnectionViewModel()).environmentObject(SettingsViewModel())
 }

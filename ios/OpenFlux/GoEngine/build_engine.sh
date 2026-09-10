@@ -2,9 +2,10 @@
 #
 # Produces GoEngine/liboflux.a for the current Xcode build.
 #
-# Two outcomes:
+# Outcomes:
 #   native  — the Go c-archive built and exports RunMainClient
-#   stub    — a generated no-op archive, so the app still links and runs
+#   stub    — only simulator or explicit FORCE_STUB=1 builds
+#   failure — native device build errors are fatal and remain visible in CI
 #
 # The stub keeps the Xcode target buildable before the Go engine grows its
 # //export surface, and keeps simulator builds working (Go cannot target the
@@ -21,6 +22,7 @@
 # writes anything outside ios/.
 
 set -euo pipefail
+trap 'status=$?; echo "error: Go engine build failed at line ${LINENO} (exit ${status})" >&2; exit "$status"' ERR
 
 SRCROOT="${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 OUT_DIR="${SRCROOT}/GoEngine"
@@ -38,6 +40,8 @@ write_stub() {
   cat > "${stub_src}" <<'STUB_EOF'
 /* Generated no-op engine. See GoEngine/build_engine.sh. */
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 void RunMainClient(char *url) { (void)url; }
 int OpenFluxStartTunnel(char *url, int port) { (void)url; (void)port; return -1; }
@@ -47,29 +51,43 @@ int OpenFluxIsConnected(void) { return 0; }
 long long OpenFluxBytesIn(void) { return 0; }
 long long OpenFluxBytesOut(void) { return 0; }
 int OpenFluxEngineIsStub(void) { return 1; }
+void OpenFluxStubBuildMarker(void) {}
+char *OpenFluxCopyLogs(void) { return strdup("[engine] Stub build: native Go engine is unavailable.\n"); }
+void OpenFluxFreeLogs(char *logs) { free(logs); }
 STUB_EOF
 
-  local cc sdk arch
+  local cc sdk arch target_flag
   cc="$(xcrun --sdk "${PLATFORM_NAME}" --find clang)"
   sdk="$(xcrun --sdk "${PLATFORM_NAME}" --show-sdk-path)"
-  arch="$(echo "${ARCHS:-arm64}" | awk '{print $1}')"
-
-  local target_flag=""
-  if [ "${PLATFORM_NAME}" = "iphonesimulator" ]; then
-    target_flag="-target ${arch}-apple-ios-simulator"
-  fi
-
-  local obj="${OUT_DIR}/.engine_stub.o"
-  # shellcheck disable=SC2086
-  "${cc}" -c -O2 -isysroot "${sdk}" -arch "${arch}" ${target_flag} \
-    -mios-version-min=17.0 \
-    -o "${obj}" "${stub_src}"
+  local -a slices=()
+  # Bitrise's default iOS test build requests arm64 and x86_64 simulators in
+  # one invocation. Build a stub slice for every requested architecture; using
+  # only the first ARCHS value makes the other linker fail with undefined Go
+  # bridge symbols.
+  for arch in ${ARCHS:-arm64}; do
+    target_flag=""
+    if [ "${PLATFORM_NAME}" = "iphonesimulator" ]; then
+      target_flag="-target ${arch}-apple-ios-simulator"
+    fi
+    local obj="${OUT_DIR}/.engine_stub.${arch}.o"
+    local slice="${OUT_DIR}/.engine_stub.${arch}.a"
+    # shellcheck disable=SC2086
+    "${cc}" -c -O2 -isysroot "${sdk}" -arch "${arch}" ${target_flag} \
+      -mios-version-min=17.0 \
+      -o "${obj}" "${stub_src}"
+    xcrun libtool -static -o "${slice}" "${obj}" 2>/dev/null \
+      || ar rcs "${slice}" "${obj}"
+    slices+=("${slice}")
+  done
 
   rm -f "${LIB}"
-  xcrun libtool -static -o "${LIB}" "${obj}" 2>/dev/null \
-    || ar rcs "${LIB}" "${obj}"
+  if [ "${#slices[@]}" -eq 1 ]; then
+    mv "${slices[0]}" "${LIB}"
+  else
+    xcrun lipo -create "${slices[@]}" -output "${LIB}"
+  fi
 
-  rm -f "${obj}" "${stub_src}"
+  rm -f "${OUT_DIR}"/.engine_stub.*.o "${OUT_DIR}"/.engine_stub.*.a "${stub_src}"
   echo "note: stub engine written to ${LIB}"
 }
 
@@ -86,13 +104,13 @@ fi
 
 # --- Prerequisites -----------------------------------------------------------
 if ! command -v go >/dev/null 2>&1; then
-  write_stub "go toolchain not on PATH"
-  exit 0
+  echo "error: go toolchain not on PATH: ${PATH}" >&2
+  exit 1
 fi
 
 if [ ! -f "${ENGINE_DIR}/main.go" ]; then
-  write_stub "no engine sources at ${ENGINE_DIR}"
-  exit 0
+  echo "error: no engine sources at ${ENGINE_DIR}" >&2
+  exit 1
 fi
 
 # --- Real Go c-archive -------------------------------------------------------
@@ -106,7 +124,7 @@ rm -f "${TMP_LIB}"
 echo "note: building Go engine for ios/${ARCH}"
 
 if [ "${OPENFLUX_SKIP_TIDY:-0}" != "1" ]; then
-  ( cd "${ENGINE_DIR}" && go mod download ) || true
+  ( cd "${ENGINE_DIR}" && go mod download )
 fi
 
 if ! (
@@ -120,17 +138,17 @@ if ! (
   CGO_LDFLAGS="-isysroot ${SDK_PATH} -arch ${ARCH} -miphoneos-version-min=17.0" \
   go build -buildmode=c-archive -trimpath -ldflags="-s -w" -o "${TMP_LIB}" .
 ); then
-  write_stub "go build failed"
-  exit 0
+  echo "error: native Go build failed; see compiler output above" >&2
+  exit 1
 fi
 
 # --- Verify the archive actually exports the bridge symbols ------------------
-# The linker fails with undefined symbols if the archive lacks them, so fall
-# back to the stub rather than breaking the build.
-if ! nm -gU "${TMP_LIB}" 2>/dev/null | grep -q '_RunMainClient'; then
+# Missing bridge symbols must fail the native build.
+nm -gU "${TMP_LIB}" > "${OUT_DIR}/engine-symbols.txt"
+if ! grep -q '_RunMainClient' "${OUT_DIR}/engine-symbols.txt"; then
   rm -f "${TMP_LIB}"
-  write_stub "archive exports no RunMainClient"
-  exit 0
+  echo "error: archive exports no RunMainClient" >&2
+  exit 1
 fi
 
 mv -f "${TMP_LIB}" "${LIB}"

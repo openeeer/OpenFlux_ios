@@ -44,18 +44,18 @@ final class NetworkManager: ObservableObject {
             status = .error("Invalid document URL")
             return
         }
+        guard (1...65535).contains(config.socksPort) else {
+            status = .error("Invalid SOCKS port")
+            return
+        }
 
         status = .connecting
         generation &+= 1
         let gen = generation
+        let port = config.socksPort
 
         let thread = Thread { [weak self] in
-            Self.runTunnel(
-                url: url.absoluteString,
-                port: config.socksPort,
-                generation: gen,
-                owner: self
-            )
+            Self.runTunnel(url: url.absoluteString, port: port, generation: gen, owner: self)
         }
         thread.name = "openflux.tunnel"
         thread.stackSize = 1 << 20

@@ -19,8 +19,8 @@ extern "C" {
 /// Blocks for the lifetime of the tunnel; call from a background thread.
 void RunMainClient(char *url);
 
-/// Non-blocking variant: starts the tunnel on `port` and returns immediately.
-/// Returns 0 on success, non-zero when the listener could not be opened.
+/// Starts the tunnel on `port` and blocks for its lifetime. Returns non-zero
+/// when the listener could not be opened.
 int OpenFluxStartTunnel(char *url, int port);
 
 /// Start the exit-node raw-socket engine. Requires root, unusable on iOS.
@@ -40,6 +40,9 @@ long long OpenFluxBytesOut(void);
 /// 0 when the real engine is linked. Lets the UI tell "tunnelling" apart from
 /// "pretending to tunnel" instead of guessing.
 int OpenFluxEngineIsStub(void);
+/// Owned UTF-8 snapshot, released using OpenFluxFreeLogs (not Swift ownership).
+char *OpenFluxCopyLogs(void);
+void OpenFluxFreeLogs(char *logs);
 
 #ifdef __cplusplus
 }

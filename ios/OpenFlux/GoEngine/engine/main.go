@@ -18,14 +18,19 @@ package main
 import "C"
 
 import (
+	"fmt"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"universal-bypass-tool/transport"
 	"universal-bypass-tool/transport/yandex"
 	"universal-bypass-tool/tunnel"
+	"universal-bypass-tool/utils"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,6 +56,24 @@ var (
 	active *engine
 )
 
+var engineLogs logBuffer
+
+func init() {
+	output := io.MultiWriter(&engineLogs, os.Stderr)
+	log.SetOutput(output)
+	utils.EnableDebugWithWriter(output)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	log.Print("[engine] native Go engine initialized")
+}
+
+// OpenFluxCopyLogs returns an owned snapshot; release with OpenFluxFreeLogs.
+//
+//export OpenFluxCopyLogs
+func OpenFluxCopyLogs() *C.char { return C.CString(engineLogs.snapshot()) }
+
+//export OpenFluxFreeLogs
+func OpenFluxFreeLogs(p *C.char) { C.free(unsafe.Pointer(p)) }
+
 // ---------------------------------------------------------------------------
 // Exported C surface
 // ---------------------------------------------------------------------------
@@ -64,7 +87,9 @@ func RunMainClient(url *C.char) {
 	if url == nil {
 		return
 	}
-	start(C.GoString(url), 1080)
+	if err := start(C.GoString(url), 1080); err != nil {
+		log.Printf("[engine] start failed: %v", err)
+	}
 }
 
 // OpenFluxStartTunnel starts the SOCKS listener on the requested port and
@@ -140,7 +165,8 @@ func StopTunnel() {
 	}
 }
 
-// OpenFluxIsConnected reports whether the transport currently holds a session.
+// OpenFluxIsConnected reports whether the local SOCKS listener is alive. The
+// Yandex WebSocket can reconnect briefly without invalidating the tunnel.
 //
 //export OpenFluxIsConnected
 func OpenFluxIsConnected() C.int {
@@ -192,6 +218,7 @@ func OpenFluxEngineIsStub() C.int { return 0 }
 // ---------------------------------------------------------------------------
 
 func start(docURL string, port int) error {
+	log.Printf("[engine] connection requested, SOCKS port=%d", port)
 	engMu.Lock()
 	if active != nil {
 		engMu.Unlock()
@@ -209,10 +236,11 @@ func start(docURL string, port int) error {
 
 	pool, err := yandex.NewSessionPool(docURL, cfg, 1)
 	if err != nil {
-		return err
+		return fmt.Errorf("create Yandex session: %w", err)
 	}
+	log.Print("[engine] starting Yandex transport")
 	if err := pool.Start(); err != nil {
-		return err
+		return fmt.Errorf("start Yandex transport: %w", err)
 	}
 
 	tun := tunnel.NewTCPTunnel(pool, false)
@@ -220,7 +248,7 @@ func start(docURL string, port int) error {
 	proxy := newSOCKSProxy(port, tun)
 	if err := proxy.Listen(); err != nil {
 		_ = pool.Stop()
-		return err
+		return fmt.Errorf("listen on SOCKS port %d: %w", port, err)
 	}
 
 	e := &engine{
@@ -249,16 +277,24 @@ func start(docURL string, port int) error {
 
 	go proxy.Serve()
 
-	// Watch the transport so a dropped session flips the UI state.
+	// A WebSocket reconnect is normal for Yandex Docs. Keep the local SOCKS
+	// listener alive and report the transition in Logs instead of telling Swift
+	// that the whole tunnel died. The next transport retry restores traffic.
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		online := pool.IsConnected()
+		log.Printf("[engine] Yandex transport online=%t", online)
 		for {
 			select {
 			case <-e.done:
 				return
 			case <-ticker.C:
-				e.connected.Store(pool.IsConnected())
+				next := pool.IsConnected()
+				if next != online {
+					online = next
+					log.Printf("[engine] Yandex transport online=%t", online)
+				}
 			}
 		}
 	}()

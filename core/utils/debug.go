@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 )
@@ -12,8 +13,18 @@ var (
 )
 
 func EnableDebug() {
+	EnableDebugWithWriter(os.Stderr)
+}
+
+// EnableDebugWithWriter enables diagnostics while sending them to w. It is
+// used by embedders (such as the iOS bridge) that must retain useful transport
+// errors for an in-app log viewer as well as writing them to stderr.
+func EnableDebugWithWriter(w io.Writer) {
+	if w == nil {
+		w = os.Stderr
+	}
 	verbose = true
-	debugLog = log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
+	debugLog = log.New(w, "", log.LstdFlags|log.Lmicroseconds)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
 }
 
