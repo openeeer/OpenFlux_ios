@@ -109,9 +109,9 @@ struct SettingsView: View {
                             .foregroundColor(.textSecondary)
                             .padding(.bottom, 12)
 
-                        AboutRow(label: "Version", value: Bundle.appVersion)
+                        AboutRow(label: "Version", value: Bundle.main.appVersion)
                         Divider().overlay(Color.glassBorder)
-                        AboutRow(label: "Build", value: Bundle.buildNumber)
+                        AboutRow(label: "Build", value: Bundle.main.buildNumber)
                         Divider().overlay(Color.glassBorder)
                         AboutRow(label: "License", value: "GPL-3.0")
                     }

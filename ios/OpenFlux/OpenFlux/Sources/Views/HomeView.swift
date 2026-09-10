@@ -193,15 +193,15 @@ private struct ConnectOrb: View {
 
             // Glass disc
             Circle()
-                .fill(
-                    ZStack {
-                        Color.glassSurface
+                .fill(Color.glassSurface)
+                .overlay(
+                    Circle().fill(
                         LinearGradient(
                             colors: [Color.white.opacity(0.10), Color.clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
-                    }
+                    )
                 )
                 .frame(width: 176, height: 176)
                 .overlay(
