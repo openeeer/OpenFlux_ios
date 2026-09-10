@@ -37,12 +37,13 @@ workflows:
       - name: Prime Go module cache
         script: |
           cd ios/OpenFlux/GoEngine/engine
-          # go.sum is committed; this only warms the cache. A failure here is
-          # not fatal — build_engine.sh falls back to the stub engine.
+          # Optional cache warmup; the engine build repeats this with strict
+          # error handling before compiling the native archive.
           go mod download || true
 
       - name: Build archive (unsigned)
         script: |
+          set -euo pipefail
           cd ios/OpenFlux
           xcodebuild archive \
             -project "$XCODE_PROJECT" \
@@ -53,21 +54,26 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            | xcbeautify
+            2>&1 | tee "$CM_BUILD_DIR/xcodebuild-archive.log" | xcbeautify
+          test -d "$CM_BUILD_DIR/OpenFlux.xcarchive/Products/Applications/OpenFlux.app"
 
       - name: Verify engine flavour
         script: |
+          set -euo pipefail
           # Tells a real tunnel apart from the generated no-op archive, so a
           # green build is not mistaken for a working engine.
           LIB="ios/OpenFlux/GoEngine/liboflux.a"
-          if nm -gU "$LIB" 2>/dev/null | grep -q '_OpenFluxBytesIn'; then
+          nm -gU "$LIB" > "$CM_BUILD_DIR/engine-symbols.log"
+          if grep -q '_OpenFluxBytesIn' "$CM_BUILD_DIR/engine-symbols.log" && ! grep -q '_OpenFluxStubBuildMarker' "$CM_BUILD_DIR/engine-symbols.log"; then
             echo "engine: NATIVE (Go c-archive)"
           else
             echo "engine: STUB — the app will refuse to connect at runtime"
+            exit 1
           fi
 
       - name: Package IPA
         script: |
+          set -euo pipefail
           APP=$(find "$CM_BUILD_DIR/OpenFlux.xcarchive/Products/Applications" \
                 -maxdepth 1 -name '*.app' | head -n1)
           if [ -z "$APP" ]; then
@@ -81,6 +87,8 @@ workflows:
           rm -rf Payload
 
     artifacts:
+      - $CM_BUILD_DIR/xcodebuild-archive.log
+      - $CM_BUILD_DIR/engine-symbols.log
       - $CM_BUILD_DIR/ipa/*.ipa
       - $CM_BUILD_DIR/OpenFlux.xcarchive
       - /tmp/xcodebuild_logs/*.log
