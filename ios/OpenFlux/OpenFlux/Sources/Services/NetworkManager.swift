@@ -145,9 +145,9 @@ final class NetworkManager: ObservableObject {
             self.stats.bytesIn  = Int64(OpenFluxBytesIn())
             self.stats.bytesOut = Int64(OpenFluxBytesOut())
 
-            // The engine dropping its listener is the authoritative signal that
-            // the session died; the blocking RunMainClient call may not have
-            // unwound yet.
+            // This checks the local SOCKS listener, not a momentary WebSocket
+            // state. Yandex Docs can reconnect in the background; treating
+            // that brief transition as fatal made the UI disconnect randomly.
             if OpenFluxIsConnected() == 0 {
                 self.stopStatsTimer()
                 self.status = .error("Tunnel closed by engine")

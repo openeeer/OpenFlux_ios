@@ -30,6 +30,7 @@ import (
 	"universal-bypass-tool/transport"
 	"universal-bypass-tool/transport/yandex"
 	"universal-bypass-tool/tunnel"
+	"universal-bypass-tool/utils"
 )
 
 // ---------------------------------------------------------------------------
@@ -58,7 +59,9 @@ var (
 var engineLogs logBuffer
 
 func init() {
-	log.SetOutput(io.MultiWriter(&engineLogs, os.Stderr))
+	output := io.MultiWriter(&engineLogs, os.Stderr)
+	log.SetOutput(output)
+	utils.EnableDebugWithWriter(output)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.Print("[engine] native Go engine initialized")
 }
@@ -138,7 +141,8 @@ func StopTunnel() {
 	}
 }
 
-// OpenFluxIsConnected reports whether the transport currently holds a session.
+// OpenFluxIsConnected reports whether the local SOCKS listener is alive. The
+// Yandex WebSocket can reconnect briefly without invalidating the tunnel.
 //
 //export OpenFluxIsConnected
 func OpenFluxIsConnected() C.int {
@@ -249,16 +253,24 @@ func start(docURL string, port int) error {
 
 	go proxy.Serve()
 
-	// Watch the transport so a dropped session flips the UI state.
+	// A WebSocket reconnect is normal for Yandex Docs. Keep the local SOCKS
+	// listener alive and report the transition in Logs instead of telling Swift
+	// that the whole tunnel died. The next transport retry restores traffic.
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+		online := pool.IsConnected()
+		log.Printf("[engine] Yandex transport online=%t", online)
 		for {
 			select {
 			case <-e.done:
 				return
 			case <-ticker.C:
-				e.connected.Store(pool.IsConnected())
+				next := pool.IsConnected()
+				if next != online {
+					online = next
+					log.Printf("[engine] Yandex transport online=%t", online)
+				}
 			}
 		}
 	}()
