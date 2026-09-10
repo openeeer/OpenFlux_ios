@@ -1,0 +1,66 @@
+format_version: '13'
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: ios
+
+# Select a macOS/Xcode stack in Bitrise; signing is intentionally disabled.
+workflows:
+  ios-unsigned:
+    description: Build the native Go engine and an unsigned iOS IPA.
+    steps:
+      - activate-ssh-key@4:
+          run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+      - git-clone@8: {}
+      - script@1:
+          title: Build native engine, archive and unsigned IPA
+          inputs:
+            - content: |-
+                #!/bin/bash
+                set -euo pipefail
+                : "${BITRISE_SOURCE_DIR:?}"
+                : "${BITRISE_DEPLOY_DIR:?}"
+                mkdir -p "$BITRISE_DEPLOY_DIR"
+                # Keep all diagnostics even when the script fails.
+                exec > >(tee "$BITRISE_DEPLOY_DIR/build.log") 2>&1
+                test "$(uname -s)" = Darwin || { echo 'error: select a macOS/Xcode stack'; exit 1; }
+                if ! command -v go >/dev/null 2>&1; then
+                  brew install go
+                  export PATH="$(brew --prefix go)/bin:$PATH"
+                fi
+                export GOTOOLCHAIN=auto
+                export FORCE_STUB=0
+                go version
+                xcodebuild -version
+                cd "$BITRISE_SOURCE_DIR/ios/OpenFlux/GoEngine/engine"
+                go mod download
+                cd "$BITRISE_SOURCE_DIR/ios/OpenFlux"
+                BUILD_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/openflux-bitrise.XXXXXX")
+                ARCHIVE="$BUILD_ROOT/OpenFlux.xcarchive"
+                xcodebuild archive \
+                  -project OpenFlux.xcodeproj \
+                  -scheme OpenFlux \
+                  -configuration Release \
+                  -archivePath "$ARCHIVE" \
+                  -destination 'generic/platform=iOS' \
+                  CODE_SIGNING_ALLOWED=NO \
+                  CODE_SIGNING_REQUIRED=NO \
+                  CODE_SIGN_IDENTITY="" \
+                  2>&1 | tee "$BITRISE_DEPLOY_DIR/xcodebuild-archive.log"
+                APP="$ARCHIVE/Products/Applications/OpenFlux.app"
+                test -d "$APP"
+                nm -gU GoEngine/liboflux.a > "$BITRISE_DEPLOY_DIR/engine-symbols.log"
+                grep -q '_RunMainClient' "$BITRISE_DEPLOY_DIR/engine-symbols.log"
+                grep -q '_OpenFluxBytesIn' "$BITRISE_DEPLOY_DIR/engine-symbols.log"
+                if grep -q '_OpenFluxStubBuildMarker' "$BITRISE_DEPLOY_DIR/engine-symbols.log"; then
+                  echo 'error: stub engine detected'
+                  exit 1
+                fi
+                mkdir -p "$BUILD_ROOT/package/Payload"
+                cp -R "$APP" "$BUILD_ROOT/package/Payload/"
+                cd "$BUILD_ROOT/package"
+                zip -qry "$BITRISE_DEPLOY_DIR/OpenFlux-unsigned.ipa" Payload
+                ditto -c -k --keepParent "$ARCHIVE" "$BITRISE_DEPLOY_DIR/OpenFlux.xcarchive.zip"
+      - deploy-to-bitrise-io@2:
+          is_always_run: true
+          inputs:
+            - deploy_path: "$BITRISE_DEPLOY_DIR"
+
