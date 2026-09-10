@@ -1,0 +1,131 @@
+definitions:
+  scripts:
+    - &go_toolchain
+      name: Report Go toolchain
+      script: |
+        go version
+        go env GOROOT
+
+workflows:
+  ios-unsigned:
+    name: iOS Unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+
+    environment:
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "OpenFlux.xcodeproj"
+        XCODE_SCHEME: "OpenFlux"
+
+    triggering:
+      events:
+        - push
+        - pull_request
+      cancel_previous_builds: true
+
+    scripts:
+      - *go_toolchain
+
+      - name: Prime Go module cache
+        script: |
+          cd ios/OpenFlux/GoEngine/engine
+          go mod download || true
+
+      - name: Build archive (unsigned)
+        script: |
+          cd ios/OpenFlux
+          xcodebuild archive \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -archivePath "$CM_BUILD_DIR/OpenFlux.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | xcbeautify
+
+      - name: Verify engine flavour
+        script: |
+          LIB="ios/OpenFlux/GoEngine/liboflux.a"
+          if nm -gU "$LIB" 2>/dev/null | grep -q '_OpenFluxBytesIn'; then
+            echo "engine: NATIVE (Go c-archive)"
+          else
+            echo "engine: STUB — the app will refuse to connect at runtime"
+          fi
+
+      - name: Package IPA
+        script: |
+          APP=$(find "$CM_BUILD_DIR/OpenFlux.xcarchive/Products/Applications" \
+                -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP" ]; then
+            echo "no .app in archive" >&2
+            exit 1
+          fi
+          mkdir -p "$CM_BUILD_DIR/ipa/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/ipa/Payload/"
+          cd "$CM_BUILD_DIR/ipa"
+          zip -qry OpenFlux-unsigned.ipa Payload
+          rm -rf Payload
+
+    artifacts:
+      - $CM_BUILD_DIR/ipa/*.ipa
+      - $CM_BUILD_DIR/OpenFlux.xcarchive
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-release:
+    name: iOS Signed Release
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.openflux.app
+      vars:
+        XCODE_PROJECT: "OpenFlux.xcodeproj"
+        XCODE_SCHEME: "OpenFlux"
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+      cancel_previous_builds: false
+
+    scripts:
+      - *go_toolchain
+
+      - name: Prime Go module cache
+        script: |
+          cd ios/OpenFlux/GoEngine/engine
+          go mod download || true
+
+      - name: Set build number
+        script: |
+          cd ios/OpenFlux
+          agvtool new-version -all "$PROJECT_BUILD_NUMBER"
+
+      - name: Apply signing profiles
+        script: |
+          cd ios/OpenFlux
+          xcode-project use-profiles
+
+      - name: Build signed IPA
+        script: |
+          cd ios/OpenFlux
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - ios/OpenFlux/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      scripts:
+        - name: Summary
+          script: echo "IPA ready in ios/OpenFlux/build/ios/ipa"
