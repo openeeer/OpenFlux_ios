@@ -37,8 +37,9 @@ ios/
             └── Views/              DesignSystem, Home, Stats, Settings
 ```
 
-CI config lives at the repository root as `codemagic.yaml` — Codemagic reads
-it only from there.
+CI config lives at the repository root as `bitrise.yml`. The `unsigned-ipa`
+workflow creates a device archive without signing and packages it as an IPA
+for eSign.
 
 ---
 
@@ -108,16 +109,17 @@ links either way.
 | Symbol                          | Purpose                                    |
 |---------------------------------|--------------------------------------------|
 | `RunMainClient(char *url)`       | Start the tunnel; **blocks** until stopped |
-| `OpenFluxStartTunnel(url, port)` | Non-blocking start; 0 on success           |
+| `OpenFluxStartTunnel(url, port)` | Starts on the selected SOCKS5 port; 0 on success |
 | `StopTunnel()`                   | Shut down; releases the blocking call      |
 | `OpenFluxIsConnected()`          | 1 while the SOCKS5 listener is accepting   |
 | `OpenFluxBytesIn/Out()`          | Live traffic counters                      |
 | `OpenFluxEngineIsStub()`         | 1 for the stub archive, 0 for native       |
 | `RunMainExitNode()`              | Exit-node mode; needs root, unusable on iOS |
 
-`NetworkManager` calls `RunMainClient` on a dedicated `Thread` because it
-blocks for the tunnel's lifetime, and uses a generation counter so a
-late-returning thread cannot clobber a newer session.
+`NetworkManager` calls `OpenFluxStartTunnel` with the configured port and
+waits for `OpenFluxIsConnected()` before showing Connected. It also uses a
+generation counter so a late-returning operation cannot clobber a newer
+session.
 
 Adding an export means touching three places, or the stub and native builds
 drift apart:
@@ -157,8 +159,8 @@ this project does.
 
 ## Installing with eSign
 
-1. Run the **`ios-unsigned`** workflow (pushes to any branch trigger it).
-2. Download `OpenFlux-unsigned.ipa` from the Codemagic artifacts.
+1. Run the **`unsigned-ipa`** workflow in Bitrise.
+2. Download `OpenFlux-unsigned.ipa` from the Bitrise artifacts.
 3. Transfer it to the iPhone — AirDrop, Files, or a direct download.
 4. In eSign: **Import** the IPA, pick your certificate and provisioning
    profile, **Sign**, then install.
@@ -171,22 +173,19 @@ An app signed with a free Apple ID expires after 7 days and must be resigned.
 
 ## CI
 
-`codemagic.yaml` **at the repository root** (not in `ios/`) defines two
-workflows. Codemagic only reads the config from the root, which is why it
-lives outside this directory; its paths point back into `ios/OpenFlux`.
+`bitrise.yml` at the repository root defines two workflows. Bitrise's
+`unsigned-ipa` workflow runs `xcodebuild archive` with signing disabled, then
+packages the `.app` from the archive into `OpenFlux-unsigned.ipa`.
 
-### `ios-unsigned`
+### `unsigned-ipa`
 
-Runs on every push. No Codemagic setup, no Apple account, no certificates.
-Produces `OpenFlux-unsigned.ipa` for sideloading (AltStore, Sideloadly), and
-prints whether the engine came out native or stub.
+No Bitrise signing setup is needed. It produces `OpenFlux-unsigned.ipa` for
+eSign and prints whether the engine came out native or stub.
 
-### `ios-release`
+### `signed-development`
 
-Runs on `v*` tags. Produces a signed App Store build. Requires an App Store
-Connect integration configured in the Codemagic UI and the bundle identifier
-registered in your Apple Developer account. TestFlight publishing is present
-but commented out — enable it once the integration exists.
+Requires a certificate and provisioning profile uploaded to Bitrise. It is not
+needed for the eSign workflow.
 
 Change the bundle identifier from `com.openflux.app` to one you own.
 

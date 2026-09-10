@@ -1,20 +1,16 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var connectionVM: ConnectionViewModel
-
     var body: some View {
         TabView {
             HomeView()
-                .tabItem { Label("Home", systemImage: "shield.lefthalf.filled") }
-
+                .tabItem { Label("Connection", systemImage: "shield") }
             StatsView()
-                .tabItem { Label("Stats", systemImage: "chart.bar.xaxis") }
-
+                .tabItem { Label("Activity", systemImage: "chart.bar.xaxis") }
             SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .tint(.accentCore)
+        .tint(.accentColor)
     }
 }
 
@@ -22,5 +18,4 @@ struct ContentView: View {
     ContentView()
         .environmentObject(ConnectionViewModel())
         .environmentObject(SettingsViewModel())
-        .preferredColorScheme(.dark)
 }

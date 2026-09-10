@@ -49,7 +49,7 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>OpenFlux runs a local SOCKS5 listener so your apps can route traffic through the tunnel.</string>
+	<string>OpenFlux runs a local SOCKS5 proxy for apps that support manual proxy settings.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

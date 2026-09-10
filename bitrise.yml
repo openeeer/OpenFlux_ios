@@ -1,0 +1,74 @@
+format_version: '13'
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+
+project_type: ios
+
+workflows:
+  unsigned-ipa:
+    title: OpenFlux unsigned IPA for eSign
+    description: Build an unsigned device IPA. eSign resigns it before installation.
+    envs:
+      - BITRISE_PROJECT_PATH: ios/OpenFlux/OpenFlux.xcodeproj
+      - BITRISE_SCHEME: OpenFlux
+      - BITRISE_CONFIGURATION: Release
+      - BITRISE_EXPORT_METHOD: development
+    steps:
+      - activate-ssh-key@4: {}
+      - git-clone@8: {}
+      - script@1:
+          title: Build native Go engine
+          inputs:
+            - content: |
+                set -e
+                cd "$BITRISE_SOURCE_DIR/ios/OpenFlux/GoEngine/engine"
+                go version
+                go mod download || true
+      - script@1:
+          title: Archive OpenFlux without signing
+          inputs:
+            - content: |
+                set -e
+                ARCHIVE="$BITRISE_DEPLOY_DIR/OpenFlux.xcarchive"
+                xcodebuild archive \
+                  -project "$BITRISE_SOURCE_DIR/$BITRISE_PROJECT_PATH" \
+                  -scheme "$BITRISE_SCHEME" \
+                  -configuration "$BITRISE_CONFIGURATION" \
+                  -destination 'generic/platform=iOS' \
+                  -archivePath "$ARCHIVE" \
+                  CODE_SIGNING_ALLOWED=NO \
+                  CODE_SIGNING_REQUIRED=NO \
+                  CODE_SIGN_IDENTITY=""
+                test -d "$ARCHIVE/Products/Applications"
+      - script@1:
+          title: Package unsigned IPA for eSign
+          inputs:
+            - content: |
+                set -e
+                ARCHIVE="$BITRISE_DEPLOY_DIR/OpenFlux.xcarchive"
+                APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)
+                test -n "$APP"
+                mkdir -p "$BITRISE_DEPLOY_DIR/Payload"
+                cp -R "$APP" "$BITRISE_DEPLOY_DIR/Payload/"
+                cd "$BITRISE_DEPLOY_DIR"
+                zip -qry OpenFlux-unsigned.ipa Payload
+                rm -rf Payload
+                echo "Created $BITRISE_DEPLOY_DIR/OpenFlux-unsigned.ipa"
+      - deploy-to-bitrise-io@2: {}
+
+  signed-development:
+    title: OpenFlux signed development IPA
+    description: Optional workflow for a registered Apple Developer profile.
+    envs:
+      - BITRISE_PROJECT_PATH: ios/OpenFlux/OpenFlux.xcodeproj
+      - BITRISE_SCHEME: OpenFlux
+    steps:
+      - activate-ssh-key@4: {}
+      - git-clone@8: {}
+      - certificate-and-profile-installer@1: {}
+      - xcode-archive@5:
+          inputs:
+            - project_path: "$BITRISE_PROJECT_PATH"
+            - scheme: "$BITRISE_SCHEME"
+            - distribution_method: development
+            - automatic_code_signing: api-key
+      - deploy-to-bitrise-io@2: {}

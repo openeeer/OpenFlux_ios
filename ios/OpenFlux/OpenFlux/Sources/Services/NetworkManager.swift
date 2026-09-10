@@ -29,6 +29,7 @@ final class NetworkManager: ObservableObject {
     /// overwrite the state of a newer session.
     private var generation: UInt64 = 0
     private var statsTimer: Timer?
+    private var connectionMonitorTimer: Timer?
     private let stateLock = NSLock()
 
     // MARK: - Public API
@@ -49,7 +50,12 @@ final class NetworkManager: ObservableObject {
         let gen = generation
 
         let thread = Thread { [weak self] in
-            Self.runTunnel(url: url.absoluteString, generation: gen, owner: self)
+            Self.runTunnel(
+                url: url.absoluteString,
+                port: config.socksPort,
+                generation: gen,
+                owner: self
+            )
         }
         thread.name = "openflux.tunnel"
         thread.stackSize = 1 << 20
@@ -65,6 +71,7 @@ final class NetworkManager: ObservableObject {
 
         generation &+= 1
         stopStatsTimer()
+        stopConnectionMonitor()
         tunnelThread = nil
 
         // Releases the blocking RunMainClient call on the tunnel thread.
@@ -76,7 +83,7 @@ final class NetworkManager: ObservableObject {
 
     // MARK: - Tunnel thread
 
-    private static func runTunnel(url: String, generation: UInt64, owner: NetworkManager?) {
+    private static func runTunnel(url: String, port: Int, generation: UInt64, owner: NetworkManager?) {
         guard let owner else { return }
 
         if owner.isStubEngine {
@@ -88,22 +95,26 @@ final class NetworkManager: ObservableObject {
         }
 
         owner.publish(generation: generation) {
-            $0.status = .connected
-            $0.stats = ConnectionStats(connectedSince: Date())
-            $0.startStatsTimer()
+            $0.startConnectionMonitor(generation: generation)
         }
 
-        // Blocks for the tunnel lifetime.
-        url.withCString { RunMainClient(UnsafeMutablePointer(mutating: $0)) }
+        let result = url.withCString {
+            OpenFluxStartTunnel(
+                UnsafeMutablePointer(mutating: $0),
+                Int32(port)
+            )
+        }
 
-        // Returned: either StopTunnel() fired, or the engine failed.
-        owner.publish(generation: generation) {
-            $0.stopStatsTimer()
-            if $0.status.isActive {
-                $0.status = .disconnected
-                $0.stats = ConnectionStats()
+        guard result == 0 else {
+            owner.publish(generation: generation) {
+                $0.stopConnectionMonitor()
+                $0.status = .error("Unable to start SOCKS5 proxy (code \(result))")
             }
+            return
         }
+
+        // The monitor observes the listener and publishes connected only after
+        // it is actually live.
     }
 
     /// Applies a mutation on the main queue, but only if `generation` is still
@@ -126,6 +137,33 @@ final class NetworkManager: ObservableObject {
 
     // MARK: - Stats
 
+    private func startConnectionMonitor(generation: UInt64) {
+        stopConnectionMonitor()
+        connectionMonitorTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.stateLock.lock()
+            let current = self.generation == generation
+            self.stateLock.unlock()
+            guard current else { return }
+
+            let connected = OpenFluxIsConnected() == 1
+            if self.status == .connecting && connected {
+                self.status = .connected
+                self.stats = ConnectionStats(connectedSince: Date())
+                self.startStatsTimer()
+            } else if self.status == .connected && !connected {
+                self.stopConnectionMonitor()
+                self.stopStatsTimer()
+                self.status = .error("Tunnel connection lost")
+            }
+        }
+    }
+
+    private func stopConnectionMonitor() {
+        connectionMonitorTimer?.invalidate()
+        connectionMonitorTimer = nil
+    }
+
     private func startStatsTimer() {
         stopStatsTimer()
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -134,13 +172,6 @@ final class NetworkManager: ObservableObject {
             self.stats.bytesIn  = Int64(OpenFluxBytesIn())
             self.stats.bytesOut = Int64(OpenFluxBytesOut())
 
-            // The engine dropping its listener is the authoritative signal that
-            // the session died; the blocking RunMainClient call may not have
-            // unwound yet.
-            if OpenFluxIsConnected() == 0 {
-                self.stopStatsTimer()
-                self.status = .error("Tunnel closed by engine")
-            }
         }
     }
 
@@ -173,5 +204,8 @@ final class NetworkManager: ObservableObject {
         return parts.allSatisfy { UInt8($0) != nil }  // IPv4 dotted quad
     }
 
-    deinit { stopStatsTimer() }
+    deinit {
+        stopStatsTimer()
+        stopConnectionMonitor()
+    }
 }

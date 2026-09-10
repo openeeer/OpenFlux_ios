@@ -67,19 +67,44 @@ func RunMainClient(url *C.char) {
 	start(C.GoString(url), 1080)
 }
 
-// OpenFluxStartTunnel is the explicit form of RunMainClient: it takes the SOCKS
-// listen port as well. Returns 0 on success, non-zero on failure.
+// OpenFluxStartTunnel starts the SOCKS listener on the requested port and
+// waits until startup succeeds or fails. Returns 0 on success.
 //
 //export OpenFluxStartTunnel
 func OpenFluxStartTunnel(url *C.char, port C.int) C.int {
 	if url == nil {
 		return 1
 	}
-	if err := start(C.GoString(url), int(port)); err != nil {
-		log.Printf("[engine] start failed: %v", err)
-		return 2
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- start(C.GoString(url), int(port))
+	}()
+
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				log.Printf("[engine] start failed: %v", err)
+				return 2
+			}
+			return 0
+		case <-ticker.C:
+			engMu.Lock()
+			ready := active != nil && active.running.Load()
+			engMu.Unlock()
+			if ready {
+				return 0
+			}
+		case <-deadline.C:
+			log.Printf("[engine] start timed out")
+			return 3
+		}
 	}
-	return 0
 }
 
 // StopTunnel tears the session down and returns once the listener is closed.
