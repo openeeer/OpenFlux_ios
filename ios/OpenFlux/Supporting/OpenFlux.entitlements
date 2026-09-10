@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Intentionally empty.
+
+	  The in-process SOCKS5 listener needs no entitlement: iOS lets any app
+	  bind a loopback port. Keeping this file free of capabilities is what
+	  makes the IPA resignable with a free Apple ID (eSign, AltStore,
+	  Sideloadly) — those certificates cannot grant special entitlements, so
+	  every extra key here becomes a resigning failure.
+
+	  Do not add App Groups, Keychain sharing, or NetworkExtension keys unless
+	  you are signing with a paid developer account.
+	-->
+</dict>
+</plist>
