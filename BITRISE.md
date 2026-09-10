@@ -25,4 +25,14 @@ Build artifacts are uploaded with the final deployment step, including on failur
 No automatic Git triggers are enabled here. Start builds manually, or configure
 the desired triggers in Bitrise after the first successful build.
 
+## Collecting connection diagnostics on iPhone
+
+After installing the new build, reproduce the connection failure, open the
+`Logs` tab and tap `Скопировать`. The tab displays the latest 64 KiB of Go's
+standard logger output, including startup errors, and refreshes once per second
+while visible. Records survive disconnection but not an app restart. This is not
+a capture of arbitrary stdout writes or native crash reports. Review logs for
+document URLs and network addresses before sharing them. Copying is explicit and
+uses the local clipboard only; no logs are uploaded automatically.
+
 Reference: https://docs.bitrise.io/en/bitrise-ci/references/configuration-yaml-reference

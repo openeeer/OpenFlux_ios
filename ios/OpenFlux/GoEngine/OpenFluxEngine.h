@@ -27,6 +27,8 @@ void StopTunnel(void);
 /// 0 when the real engine is linked. Lets the UI tell "tunnelling" apart from
 /// "pretending to tunnel" instead of guessing.
 int OpenFluxEngineIsStub(void);
+char *OpenFluxCopyLogs(void);
+void OpenFluxFreeLogs(char *logs);
 
 #ifdef __cplusplus
 }

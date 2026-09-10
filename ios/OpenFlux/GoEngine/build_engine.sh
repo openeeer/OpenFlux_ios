@@ -40,6 +40,8 @@ write_stub() {
   cat > "${stub_src}" <<'STUB_EOF'
 /* Generated no-op engine. See GoEngine/build_engine.sh. */
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 void RunMainClient(char *url) { (void)url; }
 int OpenFluxStartTunnel(char *url, int port) { (void)url; (void)port; return -1; }
@@ -50,6 +52,8 @@ long long OpenFluxBytesIn(void) { return 0; }
 long long OpenFluxBytesOut(void) { return 0; }
 int OpenFluxEngineIsStub(void) { return 1; }
 void OpenFluxStubBuildMarker(void) {}
+char *OpenFluxCopyLogs(void) { return strdup("[engine] Stub build: native Go engine is unavailable.\n"); }
+void OpenFluxFreeLogs(char *logs) { free(logs); }
 STUB_EOF
 
   local cc sdk arch

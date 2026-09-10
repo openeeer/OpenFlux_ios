@@ -18,10 +18,14 @@ package main
 import "C"
 
 import (
+	"fmt"
+	"io"
 	"log"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"universal-bypass-tool/transport"
 	"universal-bypass-tool/transport/yandex"
@@ -51,6 +55,22 @@ var (
 	active *engine
 )
 
+var engineLogs logBuffer
+
+func init() {
+	log.SetOutput(io.MultiWriter(&engineLogs, os.Stderr))
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	log.Print("[engine] native Go engine initialized")
+}
+
+// OpenFluxCopyLogs returns an owned snapshot; release with OpenFluxFreeLogs.
+//
+//export OpenFluxCopyLogs
+func OpenFluxCopyLogs() *C.char { return C.CString(engineLogs.snapshot()) }
+
+//export OpenFluxFreeLogs
+func OpenFluxFreeLogs(p *C.char) { C.free(unsafe.Pointer(p)) }
+
 // ---------------------------------------------------------------------------
 // Exported C surface
 // ---------------------------------------------------------------------------
@@ -64,7 +84,9 @@ func RunMainClient(url *C.char) {
 	if url == nil {
 		return
 	}
-	start(C.GoString(url), 1080)
+	if err := start(C.GoString(url), 1080); err != nil {
+		log.Printf("[engine] start failed: %v", err)
+	}
 }
 
 // OpenFluxStartTunnel is the explicit form of RunMainClient: it takes the SOCKS
@@ -167,6 +189,7 @@ func OpenFluxEngineIsStub() C.int { return 0 }
 // ---------------------------------------------------------------------------
 
 func start(docURL string, port int) error {
+	log.Printf("[engine] connection requested, SOCKS port=%d", port)
 	engMu.Lock()
 	if active != nil {
 		engMu.Unlock()
@@ -184,10 +207,11 @@ func start(docURL string, port int) error {
 
 	pool, err := yandex.NewSessionPool(docURL, cfg, 1)
 	if err != nil {
-		return err
+		return fmt.Errorf("create Yandex session: %w", err)
 	}
+	log.Print("[engine] starting Yandex transport")
 	if err := pool.Start(); err != nil {
-		return err
+		return fmt.Errorf("start Yandex transport: %w", err)
 	}
 
 	tun := tunnel.NewTCPTunnel(pool, false)
@@ -195,7 +219,7 @@ func start(docURL string, port int) error {
 	proxy := newSOCKSProxy(port, tun)
 	if err := proxy.Listen(); err != nil {
 		_ = pool.Stop()
-		return err
+		return fmt.Errorf("listen on SOCKS port %d: %w", port, err)
 	}
 
 	e := &engine{
