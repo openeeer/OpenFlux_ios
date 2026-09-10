@@ -1,0 +1,17 @@
+# Build artifacts
+*.exe
+*.a
+*.o
+*.dylib
+*.so
+
+# Xcode
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
